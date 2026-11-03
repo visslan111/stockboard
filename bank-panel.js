@@ -16,6 +16,29 @@
   var SAME_API = (location.protocol === "http:" || location.protocol === "https:") ? "/api/" : null;
   var sameBroken = false;
 
+  /* ===== 统一 tooltip 配色 =====
+     原先各图只设了深色文字（#16181d），却沿用 Chart.js 默认的半透明黑底，
+     深字压深底导致悬浮提示几乎看不清。这里统一定义为「不透明深底 + 亮字」，
+     对比度约 15:1，投影到图表上也不会糊成一团。 */
+  var TIP_BG = "rgba(24,27,33,.97)";
+  var TIP_BORDER = "rgba(255,255,255,.18)";
+  var TIP_TITLE = "#ffffff";
+  var TIP_BODY = "#e9edf3";
+  try {
+    var td = Chart.defaults.plugins.tooltip;
+    td.backgroundColor = TIP_BG;
+    td.borderColor = TIP_BORDER;
+    td.borderWidth = 1;
+    td.cornerRadius = 8;
+    td.padding = 10;
+    td.caretSize = 6;
+    td.titleColor = TIP_TITLE;
+    td.bodyColor = TIP_BODY;
+    td.titleFont = { size: 12, weight: "600" };
+    td.bodyFont = { size: 11.5 };
+    td.bodySpacing = 4;
+  } catch (e) {}
+
   /* 板块可切换：默认银行Ⅱ，sectors.html 通过 window.SECTOR_CONF 指定初始板块，
      之后点列表用 SectorPanel.switchTo(secid, name) 切换。dynamic=true 时成分股由接口取。 */
   var CFG = window.SECTOR_CONF || {};
@@ -608,8 +631,10 @@
             }
           },
           tooltip: {
-            displayColors: false, padding: 9,
-            titleFont: { size: 11.5 }, bodyFont: { size: 11 }, titleColor: "#16181d", bodyColor: "#3a4150",
+            displayColors: false, padding: 10, cornerRadius: 8,
+            backgroundColor: TIP_BG, borderColor: TIP_BORDER, borderWidth: 1,
+            titleFont: { size: 12, weight: "600" }, bodyFont: { size: 11.5 }, bodySpacing: 4,
+            titleColor: TIP_TITLE, bodyColor: TIP_BODY,
             filter: function (it) { return !/^__/.test(it.dataset.label); },
             callbacks: {
               title: function (its) { return its.length ? K[its[0].dataIndex].d : ""; },
@@ -929,9 +954,11 @@
             labels: { boxWidth: 8, boxHeight: 8, font: { size: 10.5 }, color: "#6b7280" }
           },
           tooltip: {
-            displayColors: false, padding: 9,
+            displayColors: false, padding: 10, cornerRadius: 8,
+            backgroundColor: TIP_BG, borderColor: TIP_BORDER, borderWidth: 1,
             titleFont: { size: 11.5 }, bodyFont: { size: 11 },
-            titleColor: "#16181d", bodyColor: "#3a4150",
+            titleColor: TIP_TITLE, bodyColor: TIP_BODY,
+            titleFont: { size: 12, weight: "600" }, bodyFont: { size: 11.5 }, bodySpacing: 4,
             callbacks: {
               title: function (its) { return its.length ? K[its[0].dataIndex].d : ""; },
               label: function (c2) {
@@ -1215,9 +1242,11 @@
             labels: { boxWidth: 8, boxHeight: 8, font: { size: 10.5 }, color: "#6b7280" }
           },
           tooltip: {
-            displayColors: false, padding: 9,
+            displayColors: false, padding: 10, cornerRadius: 8,
+            backgroundColor: TIP_BG, borderColor: TIP_BORDER, borderWidth: 1,
             titleFont: { size: 11.5 }, bodyFont: { size: 11 },
-            titleColor: "#16181d", bodyColor: "#3a4150",
+            titleColor: TIP_TITLE, bodyColor: TIP_BODY,
+            titleFont: { size: 12, weight: "600" }, bodyFont: { size: 11.5 }, bodySpacing: 4,
             callbacks: {
               title: function (its) { return its.length ? F[its[0].dataIndex].d : ""; },
               label: function (c2) {
