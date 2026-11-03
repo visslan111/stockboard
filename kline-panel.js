@@ -32,6 +32,7 @@
 
   var PAGE = 800;      // 单次最多约 800 根，超出必须按结束日期向前翻页
   var PERIODS = [
+    { k: "min",     n: "分时", min: true },
     { k: "day",     n: "日K", need: 60, target: 320,  raw: false },
     { k: "week",    n: "周K", need: 60, target: 600,  raw: false },
     { k: "month",   n: "月K", need: 60, target: 1500, raw: false },
@@ -50,7 +51,7 @@
 
   var state = {
     open: false, info: null, period: "day",
-    rows: [], all: null, charts: {}, cache: {}, reqId: 0
+    rows: [], all: null, charts: {}, cache: {}, reqId: 0, thin: false, min: null, volUnit: 1
   };
 
   /* ---------------- 工具 ---------------- */
@@ -61,9 +62,9 @@
   function pctTxt(v) { return (v > 0 ? "+" : "") + v.toFixed(2) + "%"; }
   function fmtVol(v) {
     if (v == null) return "—";
-    if (v >= 1e8) return (v / 1e8).toFixed(2) + " 亿手";
-    if (v >= 1e4) return (v / 1e4).toFixed(1) + " 万手";
-    return Math.round(v) + " 手";
+    if (v >= 1e8) return (v / 1e8).toFixed(2) + " 亿股";
+    if (v >= 1e4) return (v / 1e4).toFixed(1) + " 万股";
+    return Math.round(v) + " 股";
   }
   function fmtNum(v, d) { return v == null ? "—" : v.toFixed(d == null ? 2 : d); }
 
@@ -99,6 +100,8 @@
         var o = (j && j.data && j.data[qk]) || {};
         var kl = o.qfqday || o.day || [];
         if (kl && kl.length) return kl;
+        // 返 200 且有该股节点、只是 K 线为空 => 已翻到上市首日之前，属正常终止
+        if (j && j.data && j.data[qk]) return [];
         throw new Error("empty");
       }).catch(function () {
         if (isSame) sameDead = true;
@@ -152,12 +155,23 @@
     for (var i = 0; i < kl.length; i++) {
       var d = kl[i];
       if (!d || d.length < 6) continue;
-      var o = num(d[1]), c = num(d[2]), h = num(d[3]), l = num(d[4]), v = num(d[5]);
+      var o = num(d[1]), c = num(d[2]), h = num(d[3]), l = num(d[4]), v = num(d[5]), amt = num(d[8]);
       if (o == null || c == null || h == null || l == null) continue;
       if (o <= 0 || c <= 0 || h <= 0 || l <= 0) continue;   // 前复权早期可能出现 0/负值，直接丢弃
-      out.push({ d: String(d[0]), o: o, c: c, h: Math.max(h, o, c), l: Math.min(l, o, c), v: v || 0 });
+      out.push({ d: String(d[0]), o: o, c: c, h: Math.max(h, o, c), l: Math.min(l, o, c), v: v || 0, amt: amt || 0 });
     }
     out.sort(function (a, b) { return a.d < b.d ? -1 : a.d > b.d ? 1 : 0; });
+    // 腾讯同一接口对不同市场的成交量单位不一致（科创板按股、主板按手）：
+    // 用「成交额 ÷ (量 × 收盘)」自洽推断，把量统一折算成「股」
+    if (out.length) {
+      var k = out[out.length - 1];
+      if (k.amt > 0 && k.v > 0 && k.c > 0) {
+        var ratio = (k.amt * 1e4) / (k.v * k.c);
+        state.volUnit = ratio > 10 ? 100 : 1;
+      }
+      // 不复权接口没有成交额字段，沿用同一只股票已判定的单位
+      if (state.volUnit === 100) for (var j = 0; j < out.length; j++) out[j].v = out[j].v * 100;
+    }
     return out;
   }
 
@@ -456,7 +470,8 @@
       + ".kp-load{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.82);font-size:13px;color:#6b7280;z-index:2;border-radius:8px}"
       + ".kp-load.hide{display:none}"
       + "@media (max-width:720px){"
-      + ".kp-mask{padding:0}.kp-box{width:100%;height:100%;max-height:none;border-radius:0}"
+      + ".kp-mask{padding:0}.kp-box{width:100%;max-height:100%;border-radius:0}"
+      + ".kp-body{overflow-y:auto}"
       + ".kp-head{padding:10px 12px 8px;gap:8px;position:relative}"
       + ".kp-title{padding-right:36px;flex:1 1 100%}"
       + ".kp-x{position:absolute;top:6px;right:6px;font-size:22px;padding:4px 8px}"
@@ -542,6 +557,10 @@
 
   function drawAll() {
     destroyCharts();
+    var macdBox = document.querySelector(".kp-sub.macd");
+    if (macdBox) macdBox.style.display = "";
+    var chartBox = document.querySelector(".kp-chart");
+    if (chartBox) chartBox.style.height = "";
     var rows = state.rows;
     var mode = state.period;
     var labels = rows.map(function (r) { return labelOf(r, mode); });
@@ -560,6 +579,34 @@
       wickC.push(col); bodyC.push(col); volC.push(col);
     }
 
+    // 主图 y 轴必须贴合价格区间：Chart.js 的 bar 默认从 0 起算，
+    // 高价股（如茅台 1400+）会被压成一条直线，新股则下方留出大片空白
+    var yLo = Infinity, yHi = -Infinity;
+    for (var bi = 0; bi < rows.length; bi++) {
+      if (rows[bi].l < yLo) yLo = rows[bi].l;
+      if (rows[bi].h > yHi) yHi = rows[bi].h;
+    }
+    var maSets = [ma5, ma10, ma20, ma60];
+    for (var mi = 0; mi < maSets.length; mi++) {
+      for (var mj = 0; mj < maSets[mi].length; mj++) {
+        var mv = maSets[mi][mj];
+        if (mv == null) continue;
+        if (mv < yLo) yLo = mv;
+        if (mv > yHi) yHi = mv;
+      }
+    }
+    if (!isFinite(yLo) || !isFinite(yHi) || yHi <= yLo) { yLo = 0; yHi = 1; }
+    var padY = (yHi - yLo) * 0.08;
+    // 让主图出现 4~6 条刻度线（Chart.js 默认步长太粗，高价股只剩 2 条）
+    var spanY = (yHi + padY) - (yLo - padY);
+    var rawStep = spanY / 6;
+    var magY = Math.pow(10, Math.floor(Math.log10(rawStep || 1)));
+    var normY = (rawStep || 1) / magY;
+    var stepY = (normY <= 1 ? 1 : normY <= 2 ? 2 : normY <= 2.5 ? 2.5 : normY <= 5 ? 5 : 10) * magY;
+    // 边界对齐到步长整数倍，刻度才会落在 1200/1300/1400 这种整齐值上
+    var yMin = Math.floor((yLo - padY) / stepY) * stepY;
+    var yMax = Math.ceil((yHi + padY) / stepY) * stepY;
+
     var compact = window.innerWidth < 720;
     var axisFont = { size: compact ? 9 : 10 };
     var yCommon = {
@@ -574,9 +621,9 @@
       data: {
         labels: labels,
         datasets: [
-          { label: "影线", data: wick, backgroundColor: wickC, borderWidth: 0, barThickness: 1.2, order: 4 },
+          { label: "影线", data: wick, backgroundColor: wickC, borderWidth: 0, barThickness: 1.2, maxBarThickness: 2, order: 4 },
           { label: "K线", data: body, backgroundColor: bodyC, borderColor: bodyC, borderWidth: 0.6,
-            barPercentage: 0.66, categoryPercentage: 0.92, order: 3 },
+            barPercentage: 0.66, categoryPercentage: 0.92, maxBarThickness: 26, order: 3 },
           { type: "line", label: "MA5", data: ma5, borderColor: C.ma5, borderWidth: 1.2, pointRadius: 0, tension: 0, order: 2 },
           { type: "line", label: "MA10", data: ma10, borderColor: C.ma10, borderWidth: 1.2, pointRadius: 0, tension: 0, order: 2 },
           { type: "line", label: "MA20", data: ma20, borderColor: C.ma20, borderWidth: 1.3, pointRadius: 0, tension: 0, order: 2 },
@@ -590,7 +637,12 @@
         layout: { padding: { top: 4 } },
         scales: {
           x: { display: false, grid: { display: false } },
-          y: Object.assign({}, yCommon, { beginAtZero: false, grace: "8%" })
+          y: Object.assign({}, yCommon, {
+            beginAtZero: false, min: yMin, max: yMax,
+            ticks: Object.assign({}, yCommon.ticks, {
+              callback: function (v) { return v >= 100 ? v.toFixed(0) : v.toFixed(2); }
+            })
+          })
         },
         plugins: {
           legend: {
@@ -632,7 +684,7 @@
     for (var j = 0; j < rows.length; j++) if (rows[j].v > volMax) volMax = rows[j].v;
     state.charts.vol = new Chart(document.getElementById("kpVol").getContext("2d"), {
       type: "bar",
-      data: { labels: labels, datasets: [{ label: "成交量", data: rows.map(function (r) { return r.v; }), backgroundColor: volC, borderWidth: 0, barPercentage: 0.66, categoryPercentage: 0.92 }] },
+      data: { labels: labels, datasets: [{ label: "成交量", data: rows.map(function (r) { return r.v; }), backgroundColor: volC, borderWidth: 0, barPercentage: 0.66, categoryPercentage: 0.92, maxBarThickness: 26 }] },
       options: {
         maintainAspectRatio: false, animation: false,
         interaction: { mode: "index", intersect: false },
@@ -669,7 +721,7 @@
       data: {
         labels: labels,
         datasets: [
-          { label: "MACD", data: m.hist, backgroundColor: histC, borderWidth: 0, barPercentage: 0.6, categoryPercentage: 0.9, order: 3 },
+          { label: "MACD", data: m.hist, backgroundColor: histC, borderWidth: 0, barPercentage: 0.6, categoryPercentage: 0.9, maxBarThickness: 24, order: 3 },
           { type: "line", label: "DIF", data: m.dif, borderColor: C.dif, borderWidth: 1.3, pointRadius: 0, tension: 0, order: 2 },
           { type: "line", label: "DEA", data: m.dea, borderColor: C.dea, borderWidth: 1.3, pointRadius: 0, tension: 0, order: 2 }
         ]
@@ -725,7 +777,9 @@
     var hist = m.hist;
     var histNow = hist[last];
 
+    var thin = rows.length < 20;
     var chips = [];
+    if (thin) chips.push(chip("样本仅 " + rows.length + " 根", "flat"));
     if (vp) chips.push(chip(vp.tag, vp.tone));
     if (dv.type === "top") chips.push(chip(dv.beat ? "顶背离 · 背驰" : "顶背离", "bad"));
     else if (dv.type === "bottom") chips.push(chip(dv.beat ? "底背离 · 背驰" : "底背离", "good"));
@@ -738,6 +792,9 @@
     document.getElementById("kpVerdict").innerHTML = chips.join("");
 
     var lines = [];
+    if (!vp && thin) {
+      lines.push("<b>量价</b>　样本仅 " + rows.length + " 根，量价四象限与相关性需要至少 12 根才具统计意义，暂不判定。");
+    }
     if (vp) {
       lines.push("<b>量价</b>　近 5 根 " + pctTxt(vp.pct5) + "，量能 " + vp.vr.toFixed(2) + " 倍（近 5 根均量 "
         + fmtVol(vp.vol5) + " / 前 5 根 " + fmtVol(vp.volP) + "）→ " + vp.tag
@@ -757,7 +814,12 @@
         + "（" + (dv.shrink >= 0 ? "萎缩 " + dv.shrink.toFixed(0) + "%" : "扩张 " + Math.abs(dv.shrink).toFixed(0) + "%") + "），"
         + (dv.beat ? "<b>后段动能明显弱于前段，构成背驰</b>，趋势进入衰竭区。" : "面积尚未明显萎缩，形态成立但动能未衰竭，暂不构成标准背驰。"));
     } else {
-      lines.push("<b>背离</b>　本区间内未找到满足条件的两个同向极值点，MACD 与价格同步，暂无背离信号。");
+      if (thin) {
+        lines.push("<b>背离</b>　样本仅 " + rows.length + " 根（新股或长周期），不足以构成两个同向极值点，"
+          + "背离 / 背驰暂不判定；切到日K 或等上市满 20 个周期后再看。");
+      } else {
+        lines.push("<b>背离</b>　本区间内未找到满足条件的两个同向极值点，MACD 与价格同步，暂无背离信号。");
+      }
     }
 
     var slope = null;
@@ -772,13 +834,293 @@
     document.getElementById("kpFoot").innerHTML = lines.map(function (s) { return "<div>" + s + "</div>"; }).join("");
   }
 
+  /* ---------------- 分时 ---------------- */
+  var MIN_SRC = (SAME_API ? [
+    SAME_API + "qq2/appstock/app/minute/query?code={C}"
+  ] : []).concat([
+    "https://web.ifzq.gtimg.cn/appstock/app/minute/query?code={C}"
+  ]);
+
+  function fetchMinute(qk) {
+    var list = [];
+    for (var i = 0; i < MIN_SRC.length; i++) {
+      var isSame = MIN_SRC[i].charAt(0) === "/";
+      if (isSame && sameDead) continue;
+      list.push(MIN_SRC[i]);
+    }
+    var idx = 0;
+    function next() {
+      if (idx >= list.length) return Promise.reject(new Error("分时接口不可用"));
+      var url = list[idx++].replace("{C}", qk);
+      var isSame = url.charAt(0) === "/";
+      return fetch(url, { cache: "no-store" }).then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      }).then(function (j) {
+        var o = (j && j.data && j.data[qk]) || {};
+        var arr = (o.data && o.data.data) || [];
+        if (!arr.length) throw new Error("今日无分时");
+        var qt = (o.qt && o.qt[qk]) || [];
+        return { arr: arr, prev: num(qt[4]), price: num(qt[3]), name: qt[1] || "", date: (o.data && o.data.date) || "" };
+      }).catch(function () {
+        if (isSame) sameDead = true;
+        return next();
+      });
+    }
+    return next();
+  }
+
+  /* 每行格式：HHMM 价格 累计成交量 累计成交额(元)
+     成交量单位随市场不同（股 / 手），用「成交额 ÷ 量 ÷ 价」自洽判断后统一成股 */
+  function parseMinute(raw) {
+    var rows = [];
+    for (var i = 0; i < raw.arr.length; i++) {
+      var sp = String(raw.arr[i]).split(" ");
+      if (sp.length < 3) continue;
+      var p = num(sp[1]);
+      if (p == null || p <= 0) continue;
+      rows.push({ t: sp[0], p: p, cv: num(sp[2]), ca: num(sp[3]) });
+    }
+    if (!rows.length) return { pts: [], amt: 0 };
+
+    var lastR = rows[rows.length - 1];
+    var unit = 1;
+    if (lastR.ca > 0 && lastR.cv > 0) {
+      var g = lastR.ca / lastR.cv;              // 若量是「手」，这里会得到约 100 倍的价格
+      if (g > lastR.p * 3) unit = 100;
+    }
+
+    var pts = [];
+    for (i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      var prevCv = i ? (rows[i - 1].cv || 0) : 0;
+      var vol = r.cv == null ? 0 : Math.max(0, r.cv - prevCv) * unit;
+      pts.push({
+        t: r.t, p: r.p,
+        avg: (r.ca > 0 && r.cv > 0 ? r.ca / (r.cv * unit) : r.p),
+        vol: vol
+      });
+    }
+    return { pts: pts, amt: lastR.ca || 0 };
+  }
+
+  function drawMinute() {
+    destroyCharts();
+    var d = state.min, pts = d.pts, prev = d.prev;
+    var macdBox = document.querySelector(".kp-sub.macd");
+    if (macdBox) macdBox.style.display = "none";
+    var chartBox = document.querySelector(".kp-chart");
+    if (chartBox) chartBox.style.height = (window.innerWidth < 720 ? "260px" : "380px");
+
+    var labels = pts.map(function (x) { return x.t.slice(0, 2) + ":" + x.t.slice(2); });
+    var prices = pts.map(function (x) { return x.p; });
+    var avgs = pts.map(function (x) { return x.avg; });
+    var vols = pts.map(function (x) { return x.vol; });
+    var last = prices[prices.length - 1];
+    var col = last >= prev ? C.up : C.down;
+
+    var dev = 0;
+    for (var i = 0; i < pts.length; i++) {
+      dev = Math.max(dev, Math.abs(prices[i] - prev), Math.abs(avgs[i] - prev));
+    }
+    dev = Math.max(dev * 1.15, prev * 0.008);
+
+    var compact = window.innerWidth < 720;
+    var axisFont = { size: compact ? 9 : 10 };
+    var flatLine = [];
+    for (i = 0; i < pts.length; i++) flatLine.push(prev);
+    var volC = pts.map(function (x, k) { return k && x.p < pts[k - 1].p ? C.down : C.up; });
+
+    state.charts.main = new Chart(document.getElementById("kpMain").getContext("2d"), {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: [
+          { label: "昨收", data: flatLine, borderColor: C.flat, borderWidth: 1, borderDash: [4, 3], pointRadius: 0, tension: 0, order: 3 },
+          { label: "价格", data: prices, borderColor: col, borderWidth: 1.4, pointRadius: 0, tension: 0,
+            fill: true, backgroundColor: col + "16", order: 1 },
+          { label: "均价", data: avgs, borderColor: C.ma5, borderWidth: 1.2, pointRadius: 0, tension: 0, order: 2 }
+        ]
+      },
+      options: {
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: "index", intersect: false },
+        layout: { padding: { top: 4 } },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { font: axisFont, color: C.axis, maxRotation: 0, autoSkip: true, maxTicksLimit: compact ? 4 : 7, padding: 2 }
+          },
+          y: {
+            position: "right",
+            min: prev - dev, max: prev + dev,
+            border: { display: false },
+            grid: { color: C.grid, drawTicks: false },
+            ticks: {
+              font: axisFont, color: C.axis, maxTicksLimit: compact ? 4 : 6, padding: 4,
+              callback: function (v) { return v.toFixed(prev >= 100 ? 0 : 2); }
+            }
+          }
+        },
+        plugins: {
+          legend: {
+            position: "top", align: "end",
+            labels: { boxWidth: 8, boxHeight: 8, padding: 10, font: { size: compact ? 9.5 : 10.5 }, color: "#5b6472",
+              filter: function (it) { return it.text !== "昨收"; } }
+          },
+          tooltip: Object.assign({}, TIP, {
+            callbacks: {
+              title: function (its) { return (d.date ? d.date + " " : "") + labels[its[0].dataIndex]; },
+              label: function (c) {
+                if (c.datasetIndex !== 1) return null;
+                var r = pts[c.dataIndex];
+                return [
+                  "价 " + r.p.toFixed(2) + "   均 " + r.avg.toFixed(2),
+                  "涨跌 " + pctTxt(prev ? (r.p - prev) / prev * 100 : 0) + "   分钟量 " + fmtVol(r.vol)
+                ];
+              }
+            }
+          })
+        }
+      }
+    });
+
+    var volMax = 0;
+    for (i = 0; i < vols.length; i++) if (vols[i] > volMax) volMax = vols[i];
+    state.charts.vol = new Chart(document.getElementById("kpVol").getContext("2d"), {
+      type: "bar",
+      data: { labels: labels, datasets: [{ label: "分钟量", data: vols, backgroundColor: volC, borderWidth: 0, barPercentage: 0.8, categoryPercentage: 0.96 }] },
+      options: {
+        maintainAspectRatio: false, animation: false,
+        interaction: { mode: "index", intersect: false },
+        scales: {
+          x: { display: false, grid: { display: false } },
+          y: {
+            position: "right", beginAtZero: true, suggestedMax: volMax * 1.05,
+            border: { display: false }, grid: { color: C.grid, drawTicks: false },
+            ticks: { font: axisFont, color: C.axis, maxTicksLimit: 2, padding: 4,
+              callback: function (v) { return v >= 1e4 ? (v / 1e4).toFixed(0) + "万" : v; } }
+          }
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: Object.assign({}, TIP, {
+            callbacks: {
+              title: function (its) { return labels[its[0].dataIndex] + " 分钟量"; },
+              label: function (c) { return fmtVol(pts[c.dataIndex].vol); }
+            }
+          })
+        }
+      }
+    });
+
+    renderMinuteVerdict();
+  }
+
+  function renderMinuteVerdict() {
+    var d = state.min, pts = d.pts, prev = d.prev;
+    var lastP = pts[pts.length - 1];
+    var prices = pts.map(function (x) { return x.p; });
+    var hi = prices[0], lo = prices[0], sumVol = 0;
+    for (var i = 0; i < prices.length; i++) {
+      if (prices[i] > hi) hi = prices[i];
+      if (prices[i] < lo) lo = prices[i];
+      sumVol += pts[i].vol;
+    }
+    var upMin = 0, downMin = 0;
+    for (i = 1; i < prices.length; i++) {
+      if (prices[i] > prices[i - 1]) upMin++;
+      else if (prices[i] < prices[i - 1]) downMin++;
+    }
+    var pct = prev ? (lastP.p - prev) / prev * 100 : 0;
+    var devAvg = lastP.avg ? (lastP.p - lastP.avg) / lastP.avg * 100 : 0;
+    var amp = prev ? (hi - lo) / prev * 100 : 0;
+    var pos = hi > lo ? (lastP.p - lo) / (hi - lo) * 100 : 50;
+    var total = upMin + downMin || 1;
+
+    var chips = [];
+    chips.push(chip(pct >= 0 ? "分时上涨" : "分时下跌", pct >= 0 ? "bad" : "good"));
+    chips.push(chip(lastP.p >= lastP.avg ? "价在均价上方" : "价在均价下方", lastP.p >= lastP.avg ? "bad" : "good"));
+    chips.push(chip("日内 " + pos.toFixed(0) + "% 位", pos >= 70 ? "bad" : pos <= 30 ? "good" : "flat"));
+    chips.push(chip("上涨分钟 " + (upMin / total * 100).toFixed(0) + "%", upMin >= downMin ? "info" : "flat"));
+    document.getElementById("kpVerdict").innerHTML = chips.join("");
+
+    var lines = [];
+    var t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+    lines.push("<b>分时</b>　" + (d.date || "今日") + " 共 " + pts.length + " 个分钟点（"
+      + t0.slice(0, 2) + ":" + t0.slice(2) + "–" + t1.slice(0, 2) + ":" + t1.slice(2) + "），现价 "
+      + lastP.p.toFixed(2) + "（" + pctTxt(pct) + "），昨收 " + prev.toFixed(2)
+      + "，均价 " + lastP.avg.toFixed(2) + "（偏离 " + pctTxt(devAvg) + "）。");
+    lines.push("<b>区间</b>　日内高 " + hi.toFixed(2) + " / 低 " + lo.toFixed(2) + "，振幅 " + amp.toFixed(2)
+      + "%，现价处于日内 " + pos.toFixed(0) + "% 分位；上涨分钟 " + upMin + " / 下跌分钟 " + downMin + "。");
+    lines.push("<b>量能</b>　累计成交 " + fmtVol(sumVol) + "，成交额 "
+      + (d.amt >= 1e8 ? (d.amt / 1e8).toFixed(2) + " 亿" : (d.amt / 1e4).toFixed(0) + " 万") + "元。");
+    lines.push('<span style="color:#9aa0a8">分时仅反映当日盘中强弱，需结合日线结构与量能判断；不构成投资建议。</span>');
+    document.getElementById("kpFoot").innerHTML = lines.map(function (x) { return "<div>" + x + "</div>"; }).join("");
+  }
+
+  function syncTabs() {
+    var els = document.querySelectorAll("#kpTabs .kp-tab");
+    for (var i = 0; i < els.length; i++) els[i].classList.toggle("on", els[i].dataset.p === state.period);
+  }
+
+  /* 名称/报价兜底：stocks.js 静态快照里没有的新股（如 688836 宇树科技-W）也能显示全 */
+  function applyQuote(name, price, prev) {
+    var info = state.info;
+    if (!info) return;
+    if (name && (!info.name || info.name === info.code)) {
+      info.name = name;
+      document.getElementById("kpName").textContent = name;
+    }
+    var priceEl = document.getElementById("kpPrice");
+    var pctEl = document.getElementById("kpPct");
+    if (price == null) return;
+    if (info.price == null) info.price = price;
+    var pct = (prev > 0) ? (price - prev) / prev * 100 : null;
+    if (info.pct == null && pct != null) {
+      info.pct = pct;
+      pctEl.className = "kp-pct " + (pct > 0 ? "up" : pct < 0 ? "down" : "flat");
+      pctEl.textContent = pctTxt(pct);
+    }
+    priceEl.style.display = "";
+    priceEl.textContent = price.toFixed(2);
+    priceEl.style.color = (info.pct > 0) ? C.up : (info.pct < 0) ? C.down : C.flat;
+  }
+
+  function loadMinute(qk, reqId) {
+    var loadEl = document.getElementById("kpLoad");
+    loadEl.classList.remove("hide");
+    loadEl.textContent = "加载分时…";
+    destroyCharts();
+
+    fetchMinute(qk).then(function (raw) {
+      if (reqId !== state.reqId) return;
+      var parsed = parseMinute(raw);
+      if (parsed.pts.length < 2) throw new Error("今日无成交");
+      var pv = raw.prev || parsed.pts[0].p;
+      state.min = { pts: parsed.pts, prev: pv, amt: parsed.amt, date: raw.date, name: raw.name };
+      applyQuote(raw.name, raw.price, pv);
+      loadEl.classList.add("hide");
+      drawMinute();
+    }).catch(function () {
+      if (reqId !== state.reqId) return;
+      if (state.period !== "min") return;
+      // 分时不可用（停牌/未开盘/接口异常）→ 自动回退日K，保证面板能用
+      state.period = "day";
+      syncTabs();
+      loadAndDraw();
+    });
+  }
+
   /* ---------------- 加载 ---------------- */
   function loadAndDraw() {
     var info = state.info;
     if (!info) return;
-    var p = PERIODS.filter(function (x) { return x.k === state.period; })[0] || PERIODS[0];
     var qk = quoteKey(info);
     var reqId = ++state.reqId;
+    if (state.period === "min") { loadMinute(qk, reqId); return; }
+    var p = PERIODS.filter(function (x) { return x.k === state.period; })[0] || PERIODS[1];
 
     var loadEl = document.getElementById("kpLoad");
     loadEl.classList.remove("hide");
@@ -795,7 +1137,10 @@
       var series = aggregate(daily, state.period);
       series = cleanSeries(series);
       if (series.length > p.need) series = series.slice(series.length - p.need);
-      if (series.length < 8) throw new Error("数据不足");
+      // 新股样本天然偏少（宇树科技 2026-08 上市，季K 仅 1~2 根），
+      // 不能因为不足 60 根就判失败：够 2 根就画，另在结论区标注样本不足
+      if (series.length < 2) throw new Error("上市不足一个周期，暂无" + p.n);
+      state.thin = series.length < 20;
       state.rows = series;
       loadEl.classList.add("hide");
       drawAll();
@@ -811,7 +1156,8 @@
   function open(info) {
     ensureDom();
     state.info = info || {};
-    state.period = "day";
+    state.volUnit = 1;
+    state.period = "min";   // 盘中先看分时，日K/周K/月K/季K 一键切换
     state.rows = [];
     state.reqId++;
     var mask = document.getElementById("kpMask");
@@ -841,7 +1187,7 @@
     }
 
     var tabs = mask.querySelectorAll(".kp-tab");
-    for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle("on", tabs[i].dataset.p === "day");
+    for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle("on", tabs[i].dataset.p === "min");
 
     destroyCharts();
     document.getElementById("kpVerdict").innerHTML = "";
