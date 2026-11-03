@@ -16,6 +16,8 @@
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",Segoe UI,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;padding:18px;max-width:1180px;margin:0 auto}
   h1{font-size:20px;margin-bottom:2px;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .brand-seal{display:inline-flex;align-items:center;font-size:11px;font-weight:600;letter-spacing:.2em;color:#fff;background:linear-gradient(135deg,#1f2329,#3d4553);border-radius:6px;padding:3px 9px 3px 10px;margin-right:2px;box-shadow:0 1px 2px rgba(16,24,40,.18);white-space:nowrap}
+  .brand-seal::before{content:"";width:4px;height:4px;border-radius:50%;background:#e8b04b;margin-right:6px;flex:none}
   .desc{color:var(--sub);font-size:12.5px;margin-bottom:14px;line-height:1.7}
   .desc b{color:var(--text)}
   a{color:var(--brand);text-decoration:none}
@@ -168,7 +170,7 @@
 </head>
 <body>
 
-<h1>📊 板块全景 <span style="font-size:12px;font-weight:600;color:var(--brand);background:#eef2fb;border-radius:8px;padding:3px 9px">点击卡片展开详情</span></h1>
+<h1><span class="brand-seal">盖率出品</span>📊 板块全景 <span style="font-size:12px;font-weight:600;color:var(--brand);background:#eef2fb;border-radius:8px;padding:3px 9px">点击卡片展开详情</span></h1>
 <p class="desc">
   覆盖 <b>行业 496</b> / <b>概念 531</b> / <b>地域 31</b> 个板块（东方财富板块口径，细分等级保留 Ⅱ / Ⅲ 后缀，与同花顺板块分类基本对应）。
   点任一板块 → 下方展开<b>分时、日K、量价关系、资金流向、成分股相对走势</b>，与首页银行板块一致。

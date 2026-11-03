@@ -12,6 +12,8 @@
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",Segoe UI,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;padding:18px;max-width:1240px;margin:0 auto}
   h1{font-size:20px;margin-bottom:2px}
+  .brand-seal{display:inline-flex;align-items:center;font-size:11px;font-weight:600;letter-spacing:.2em;color:#fff;background:linear-gradient(135deg,#1f2329,#3d4553);border-radius:6px;padding:3px 9px 3px 10px;margin-right:9px;vertical-align:3px;box-shadow:0 1px 2px rgba(16,24,40,.18);white-space:nowrap}
+  .brand-seal::before{content:"";width:4px;height:4px;border-radius:50%;background:#e8b04b;margin-right:6px;flex:none}
   .desc{color:var(--sub);font-size:12.5px;margin-bottom:12px}
   .desc a{color:var(--brand);text-decoration:none}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
@@ -74,7 +76,7 @@
 </style>
 </head>
 <body>
-  <h1>📊 尾盘抢筹看板</h1>
+  <h1><span class="brand-seal">盖率出品</span>📊 尾盘抢筹看板</h1>
   <div class="desc">按「主力净流入」排序的 A 股抢筹榜 · 数据来自<a href="https://quote.eastmoney.com" target="_blank">东方财富</a>公开接口（浏览器端 JSONP，无需后端）。返回 <a href="index.html">← 股票识别看板</a></div>
 
   <div class="card">

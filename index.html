@@ -16,6 +16,11 @@
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,"PingFang SC","Microsoft YaHei",Segoe UI,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;padding:18px;max-width:1180px;margin:0 auto}
   h1{font-size:20px;margin-bottom:2px}
+  /* 品牌抬头 */
+  .brand-seal{display:inline-flex;align-items:center;font-size:11px;font-weight:600;letter-spacing:.2em;color:#fff;background:linear-gradient(135deg,#1f2329,#3d4553);border-radius:6px;padding:3px 9px 3px 10px;margin-right:9px;vertical-align:3px;box-shadow:0 1px 2px rgba(16,24,40,.18);white-space:nowrap}
+  .brand-seal::before{content:"";width:4px;height:4px;border-radius:50%;background:#e8b04b;margin-right:6px;flex:none}
+  /* 点击股票名/代码查看K线 */
+  .srow .name:hover,.srow .code:hover span{color:var(--brand);text-decoration:underline;text-underline-offset:2px}
   .desc{color:var(--sub);font-size:12.5px;margin-bottom:14px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
   textarea{width:100%;min-height:88px;resize:vertical;border:1px solid var(--line);border-radius:8px;padding:10px;font-size:13px;font-family:inherit}
@@ -642,7 +647,7 @@
 </style>
 </head>
 <body>
-  <h1>📈 股票识别看板 <a href="#fundCard" style="font-size:13px;font-weight:400;color:var(--brand);text-decoration:none;margin-left:8px">💰 资金看板 →</a><a href="tailbuy.html" style="font-size:13px;font-weight:400;color:var(--brand);text-decoration:none;margin-left:8px">尾盘抢筹看板 →</a></h1>
+  <h1><span class="brand-seal">盖率出品</span>📈 股票识别看板 <a href="#fundCard" style="font-size:13px;font-weight:400;color:var(--brand);text-decoration:none;margin-left:8px">💰 资金看板 →</a><a href="tailbuy.html" style="font-size:13px;font-weight:400;color:var(--brand);text-decoration:none;margin-left:8px">尾盘抢筹看板 →</a></h1>
   <div class="desc">粘贴含股票代码或名称的文本，自动识别并展示实时股价 / 涨跌幅 / 板块；支持 <b>拖拽分组</b>、<b>自定义分组</b>、<b>个股多符号标记</b>、<b>组内拖拽排序</b>，盘中快速异动以<b>红/绿灯</b>提示。升级：<b>自动识别操作计划</b>（如「买入贵州茅台 1600，止损 1500，止盈 1800」→ 自动填入买入/止损/止盈提醒并语音+弹窗提示）、<b>六档均线突破提示</b>、<b>备份恢复</b>。市场覆盖：<b>A股</b> / <b>港股</b>（如 00700、hk03690）/ <b>美股</b>（如 AAPL、usTSLA）。</div>
 
   <div class="card">
@@ -1919,6 +1924,17 @@
     flagBtn.onclick=(e)=>{ e.stopPropagation(); openMarkMenu(flagBtn, st); };
     const name = document.createElement('span'); name.className='name'; name.textContent=meta.n||st.code;
     tdName.append(flagBtn, led, name);
+    // 点击代码 / 名称 → 打开近 60 根 K 线研判（日/周/月/季 + 量能 + MACD + 背离背驰）
+    const openK = (e)=>{
+      e.stopPropagation();
+      if(window.KPanel) KPanel.open({ code: st.code, name: meta.n || st.code, market: st.market || 'a', price: st.price, pct: st.pct });
+    };
+    tdCode.style.cursor='pointer';
+    tdCode.title='点击查看近 60 根 K 线（日/周/月/季）+ 量能 + MACD + 量价与背离判断';
+    name.style.cursor='pointer';
+    name.title='点击查看 K 线研判';
+    tdCode.onclick = openK;
+    name.onclick = openK;
     // 操作策略 + 均线（第二行）
     const row2 = document.createElement('div'); row2.className='row2';
     const strat = strategyOf(st);
@@ -3457,5 +3473,6 @@
 </script>
 <script src="fund-panel.js?v=20261023b"></script>
 <script src="bank-panel.js?v=20261102m"></script>
+<script src="kline-panel.js?v=20261103a"></script>
 </body>
 </html>
