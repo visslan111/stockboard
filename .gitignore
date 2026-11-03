@@ -1,0 +1,21 @@
+# 本地环境 / 部署残留
+.env
+.env.*
+NUL
+.edgeone/
+*.bak
+*.bak-*
+*.log
+*.tmp
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 依赖
+node_modules/
+__pycache__/
+*.pyc
